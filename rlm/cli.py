@@ -50,7 +50,11 @@ class RLMCLI:
             print("A query is required in single-shot mode.", file=sys.stderr)
             return 2
         progress = self._make_progress_callback(self.args.verbose)
-        answer, trajectory_path = self._execute_query(query, progress_callback=progress)
+        try:
+            answer, trajectory_path = self._execute_query(query, progress_callback=progress)
+        except Exception as exc:
+            print(self._format_cli_error(exc), file=sys.stderr)
+            return 2
         if self.args.verbose:
             print(f"Trajectory: {trajectory_path}", file=sys.stderr)
         print(answer)
@@ -71,10 +75,14 @@ class RLMCLI:
                 if command_result is not None:
                     return command_result
                 continue
-            answer, trajectory_path = self._execute_query(
-                raw,
-                progress_callback=self._make_progress_callback(self.args.verbose),
-            )
+            try:
+                answer, trajectory_path = self._execute_query(
+                    raw,
+                    progress_callback=self._make_progress_callback(self.args.verbose),
+                )
+            except Exception as exc:
+                print(self._format_cli_error(exc), file=sys.stderr)
+                continue
             print(answer)
             if self.args.verbose:
                 print(f"[trajectory] {trajectory_path}", file=sys.stderr)
@@ -173,6 +181,22 @@ class RLMCLI:
                 print(f"[iteration {iteration}] {event}", file=sys.stderr)
 
         return callback
+
+    def _format_cli_error(self, exc: Exception) -> str:
+        message = str(exc).strip()
+        provider = self.args.provider or self.settings.provider
+        if "API key is required" in message:
+            provider_map = {
+                "openai": "OPENAI_API_KEY",
+                "gemini": "GEMINI_API_KEY",
+                "google": "GEMINI_API_KEY",
+            }
+            env_var = provider_map.get(provider.lower(), "PROVIDER_API_KEY")
+            return (
+                f"Configuration error: {message}\n"
+                f"Set {env_var} in your environment or .env file, or choose another provider with --provider."
+            )
+        return f"Runtime error: {message}"
 
 
 def build_parser() -> argparse.ArgumentParser:

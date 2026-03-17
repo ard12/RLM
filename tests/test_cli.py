@@ -46,3 +46,22 @@ def test_verbose_progress_goes_to_stderr(capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "iteration 2" in captured.err
+
+
+def test_single_shot_missing_api_key_returns_clean_cli_error(monkeypatch, capsys):
+    parser = build_parser()
+    cli = RLMCLI(parser.parse_args(["--repo", "/tmp/repo", "hello"]))
+    monkeypatch.setattr(
+        cli,
+        "_execute_query",
+        lambda query, progress_callback=None: (_ for _ in ()).throw(
+            ValueError("OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass api_key parameter.")
+        ),
+    )
+
+    exit_code = cli.run()
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "Configuration error:" in captured.err
+    assert "OPENAI_API_KEY" in captured.err
