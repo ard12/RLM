@@ -60,15 +60,15 @@ pip install rich
 
 Supported runtime configuration:
 
-- `RLM_PROVIDER`
-- `RLM_MODEL`
-- `RLM_RECURSIVE_MODEL`
+- `RLM_PROVIDER` (default: `openai`)
+- `RLM_MODEL` (default: `gpt-5` or `gemini-2.0-flash`)
+- `RLM_RECURSIVE_MODEL` (default: `gpt-5` or `gemini-2.0-flash`)
 - `RLM_MAX_ITERATIONS`
 - `RLM_MAX_SUB_QUERIES`
 - `RLM_REPL_TRUNCATE_LEN`
 - `RLM_CONTEXT_WARN_CHARS`
 - `RLM_STATE_DIR`
-- `CODEBASE_MEMORY_MCP_CMD`
+- `CODEBASE_MEMORY_MCP_CMD` (absolute path to `codebase-memory-mcp` binary)
 
 Provider keys are loaded through normal environment variables and `.env`:
 
@@ -135,9 +135,9 @@ print(answer)
 from rlm.rlm_repl import RLM_REPL
 
 rlm = RLM_REPL(
-    provider="openai",
-    model="gpt-5",
-    recursive_model="gpt-5-nano",
+    provider="gemini",
+    model="gemini-2.0-flash",
+    recursive_model="gemini-2.0-flash",
     repo_path="/absolute/path/to/repo",
 )
 
@@ -170,7 +170,13 @@ When repo mode is active, the REPL exposes:
 - `list_indexed_projects()`
 - `index_status(...)`
 
-If `codebase-memory-mcp` is missing, the tool layer fails gracefully with structured error payloads instead of crashing the run.
+If `codebase-memory-mcp` is missing, the tool layer fails gracefully with structured error payloads. When available, it drastically reduces token usage by enabling the model to search and index code rather than ingesting full contexts.
+
+### Robust Gemini Support
+The `GeminiClient` has been enhanced to:
+- Correctly handle "thinking" models (e.g., `gemini-2.5-flash`) by safely extracting multi-part content.
+- Map `system` messages to the native `system_instruction` API.
+- Automatically merge consecutive user/model messages to satisfy Gemini's strict alternating-role requirements.
 
 ## Guardrails and Failure Behavior
 

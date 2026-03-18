@@ -58,10 +58,10 @@ class GeminiClient:
         - ``GEMINI_API_KEY`` environment variable  (or pass api_key directly)
 
     Supported models (examples):
-        ``gemini-2.5-flash``, ``gemini-1.5-pro``, ``gemini-2.0-flash``
+        ``gemini-2.0-flash``, ``gemini-1.5-pro``
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.0-flash"):
         try:
             import google.generativeai as genai
         except ImportError:
@@ -80,38 +80,64 @@ class GeminiClient:
         self.model = model
         genai.configure(api_key=self.api_key)
         self._genai = genai
-        self.client = genai.GenerativeModel(model)
 
     def _to_gemini_messages(self, messages: "list[dict[str, str]] | str") -> tuple:
         """
-        Convert OpenAI-style messages to a Gemini history + final user prompt pair.
+        Convert OpenAI-style messages to a Gemini history + final user prompt pair + system instruction.
 
         Returns:
-            (history, user_prompt) where history is a list of Content dicts
-            and user_prompt is the last user message string.
+            (history, user_prompt, system_instruction)
         """
         if isinstance(messages, str):
-            return [], messages
+            return [], messages, None
         if isinstance(messages, dict):
             messages = [messages]
 
-        history = []
-        user_prompt = ""
+        system_instructions = []
+        processed_messages = []
 
-        for i, msg in enumerate(messages):
+        for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
 
-            # Map OpenAI roles → Gemini roles
+            if role == "system":
+                system_instructions.append(content)
+                continue
+
             gemini_role = "model" if role == "assistant" else "user"
 
-            # The last message is sent as the prompt; everything before is history
-            if i < len(messages) - 1:
-                history.append({"role": gemini_role, "parts": [content]})
+            if processed_messages and processed_messages[-1]["role"] == gemini_role:
+                processed_messages[-1]["parts"][0] += "\n" + content
             else:
-                user_prompt = content
+                processed_messages.append({"role": gemini_role, "parts": [content]})
 
-        return history, user_prompt
+        if not processed_messages:
+            return [], "", "\n".join(system_instructions) if system_instructions else None
+
+        last_msg = processed_messages.pop()
+        user_prompt = last_msg["parts"][0]
+        
+        if last_msg["role"] == "model":
+            processed_messages.append(last_msg)
+            user_prompt = ""
+
+        return processed_messages, user_prompt, "\n".join(system_instructions) if system_instructions else None
+
+    def _extract_text(self, response) -> str:
+        """
+        Safely extract text from the response, handling thinking models and multi-part content.
+        """
+        try:
+            return response.text
+        except ValueError:
+            text_parts = []
+            if hasattr(response, "candidates") and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, "content") and hasattr(candidate.content, "parts"):
+                    for part in candidate.content.parts:
+                        if hasattr(part, "text"):
+                            text_parts.append(part.text)
+            return "".join(text_parts)
 
     def completion(
         self,
@@ -120,25 +146,30 @@ class GeminiClient:
         **kwargs,
     ) -> str:
         try:
-            history, user_prompt = self._to_gemini_messages(messages)
+            history, user_prompt, system_instruction = self._to_gemini_messages(messages)
+
+            client = self._genai.GenerativeModel(
+                self.model,
+                system_instruction=system_instruction
+            )
 
             generation_config = {}
             if max_tokens is not None:
                 generation_config["max_output_tokens"] = max_tokens
 
             if history:
-                chat = self.client.start_chat(history=history)
+                chat = client.start_chat(history=history)
                 response = chat.send_message(
                     user_prompt,
                     generation_config=generation_config or None,
                 )
             else:
-                response = self.client.generate_content(
+                response = client.generate_content(
                     user_prompt,
                     generation_config=generation_config or None,
                 )
 
-            return response.text
+            return self._extract_text(response)
 
         except Exception as e:
             raise RuntimeError(f"Error generating Gemini completion: {str(e)}")
@@ -156,14 +187,14 @@ def get_llm_client(
         provider: ``"openai"`` or ``"gemini"``
         api_key:  API key (falls back to env vars ``OPENAI_API_KEY`` / ``GEMINI_API_KEY``)
         model:    Model name. Defaults to ``"gpt-5"`` for OpenAI,
-                  ``"gemini-2.5-flash"`` for Gemini.
+                  ``"gemini-2.0-flash"`` for Gemini.
 
     Returns:
         An :class:`OpenAIClient` or :class:`GeminiClient` instance.
 
     Example::
 
-        client = get_llm_client("gemini", model="gemini-2.5-flash")
+        client = get_llm_client("gemini", model="gemini-2.0-flash")
         print(client.completion("Hello!"))
     """
     provider = provider.lower().strip()
@@ -171,7 +202,7 @@ def get_llm_client(
     if provider == "openai":
         return OpenAIClient(api_key=api_key, model=model or "gpt-5")
     elif provider in ("gemini", "google"):
-        return GeminiClient(api_key=api_key, model=model or "gemini-2.5-flash")
+        return GeminiClient(api_key=api_key, model=model or "gemini-2.0-flash")
     else:
         raise ValueError(
             f"Unknown provider '{provider}'. Supported providers: 'openai', 'gemini'."
