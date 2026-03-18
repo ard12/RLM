@@ -16,6 +16,16 @@ This repo started from the minimal public RLM implementation and has been extend
 
 ![teaser](media/rlm.png)
 
+![teaser](media/rlm.png)
+
+## Core Principle: Efficient Repository Understanding
+
+The primary goal of this implementation is to pair **Recursive Language Models (RLMs)** with **Repo-Aware Indexing (`codebase-memory-mcp`)**.
+
+- **Improved Understanding**: By providing the model with structural tools (like `search_graph` and `get_architecture`), it can navigate complex codebases with surgical precision rather than trying to digest the entire repository at once.
+- **Token Efficiency**: Instead of sending tens of thousands of lines of code to the LLM (which is expensive and often exceeds context limits), the model uses the REPL to fetch only the most relevant snippets.
+- **Hallucination Reduction**: The model's answers are grounded in the actual output of the code exploration tools. It doesn't have to "guess" where a function is defined; it verifies it in the REPL before formulating a response.
+
 ## What This Repo Is Good For
 
 This implementation is best suited for:
@@ -240,18 +250,33 @@ Each trajectory contains:
 
 It intentionally does **not** store the full raw context by default.
 
-## Project Structure
+## Project Structure & File Overview
 
-Core files:
+```text
+.
+├── main.py                # CLI entrypoint (orchestrates single-shot and interactive runs)
+├── analyze.py             # Dedicated analysis script for repo-wide insights
+├── rlm/
+│   ├── cli.py             # CLI implementations (handles /repo and /file commands)
+│   ├── rlm_repl.py        # Core RLM Logic: Manages the recursive loop and state
+│   ├── repl.py            # Persistent Python REPL: Exposes MCP tools to the model
+│   ├── code_tools/
+│   │   └── codebase_memory.py # MCP Adapter: The bridge to codebase-memory-mcp terminal
+│   ├── utils/
+│   │   ├── llm.py         # LLM Clients: Robust Gemini/OpenAI drivers (role merging, text extraction)
+│   │   ├── prompts.py     # System Prompts: Instructs the model on MCP tool usage
+│   │   └── utils.py       # Helpers: Code block extraction and result formatting
+│   ├── settings.py        # Settings: Environment variable management (LLM keys, MCP paths)
+│   └── trajectory.py      # Logging: Detailed JSON traces of every model interaction
+└── tests/                 # Test suite covering model-limit handling and guardrails
+```
 
-- `main.py`: CLI entrypoint
-- `rlm/cli.py`: interactive and single-shot CLI
-- `rlm/rlm_repl.py`: main recursive runtime
-- `rlm/repl.py`: persistent execution environment and sub-query guardrails
-- `rlm/code_tools/codebase_memory.py`: optional repo backend adapter
-- `rlm/settings.py`: env-backed runtime settings
-- `rlm/trajectory.py`: trajectory logging
-- `rlm/utils/`: prompt, client, and execution helpers
+### Key Component Roles
+
+- **`rlm_repl.py` (The Coordinator)**: This is the brain of the recursive process. It initializes the `CodebaseMemoryClient` and ensures the LLM is aware of the repository's context.
+- **`code_tools/codebase_memory.py` (The Bridge)**: Acts as a lightweight adapter that turns `codebase-memory-mcp` CLI commands into interactive Python tools. This is the key to **reducing tokens**, as it offloads the heavy-lifting of code search to a specialized local indexer.
+- **`repl.py` (The Sandbox)**: Exposes the `codebase_tool_*` suite directly into the LLM's workspace. By executing these tools in a real Python environment, the model significantly **reduces hallucinations** because it sees the actual truth of the filesystem.
+- **`utils/llm.py` (The Engine)**: Recent enhancements ensure that Gemini "thinking" models remain robust when processing multi-step repository queries, handling complex role requirements automatically.
 
 ## Testing
 
