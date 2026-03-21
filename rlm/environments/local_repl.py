@@ -135,6 +135,9 @@ class LocalREPL(NonIsolatedEnv):
         custom_tools: dict[str, Any] | None = None,
         custom_sub_tools: dict[str, Any] | None = None,
         compaction: bool = False,
+        disable_lm_queries: bool = False,
+        disable_plain_lm_queries: bool = False,
+        disable_recursive_queries: bool = False,
         **kwargs,
     ):
         super().__init__(persistent=persistent, depth=depth, **kwargs)
@@ -147,6 +150,8 @@ class LocalREPL(NonIsolatedEnv):
         self._context_count: int = 0
         self._history_count: int = 0
         self.compaction = compaction
+        self.disable_plain_lm_queries = disable_lm_queries or disable_plain_lm_queries
+        self.disable_recursive_queries = disable_lm_queries or disable_recursive_queries
 
         # Custom tools: functions available in the REPL
         self.custom_tools = custom_tools or {}
@@ -247,6 +252,8 @@ class LocalREPL(NonIsolatedEnv):
             prompt: The prompt to send to the LM.
             model: Optional model name to use (if handler has multiple clients).
         """
+        if self.disable_plain_lm_queries:
+            return "Error: llm_query is disabled in this environment. Use the provided tools."
         if not self.lm_handler_address:
             return "Error: No LM handler configured"
 
@@ -274,6 +281,10 @@ class LocalREPL(NonIsolatedEnv):
         Returns:
             List of responses in the same order as input prompts.
         """
+        if self.disable_plain_lm_queries:
+            return [
+                "Error: llm_query_batched is disabled in this environment. Use the provided tools."
+            ] * len(prompts)
         if not self.lm_handler_address:
             return ["Error: No LM handler configured"] * len(prompts)
         try:
@@ -304,6 +315,8 @@ class LocalREPL(NonIsolatedEnv):
             prompt: The prompt to send to the child RLM.
             model: Optional model name override for the child.
         """
+        if self.disable_recursive_queries:
+            return "Error: rlm_query is disabled in this environment. Use the provided tools."
         if self.subcall_fn is not None:
             try:
                 completion = self.subcall_fn(prompt, model)
@@ -328,6 +341,10 @@ class LocalREPL(NonIsolatedEnv):
         Returns:
             List of responses in the same order as input prompts.
         """
+        if self.disable_recursive_queries:
+            return [
+                "Error: rlm_query_batched is disabled in this environment. Use the provided tools."
+            ] * len(prompts)
         if self.subcall_fn is not None:
             results = []
             for prompt in prompts:

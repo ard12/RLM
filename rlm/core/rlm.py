@@ -55,6 +55,7 @@ class RLM:
         environment_kwargs: dict[str, Any] | None = None,
         depth: int = 0,
         max_depth: int = 1,
+        max_recursive_calls: int | None = None,
         max_iterations: int = 30,
         max_budget: float | None = None,
         max_timeout: float | None = None,
@@ -74,6 +75,7 @@ class RLM:
         on_subcall_complete: Callable[[int, str, float, str | None], None] | None = None,
         on_iteration_start: Callable[[int, int], None] | None = None,
         on_iteration_complete: Callable[[int, int, float], None] | None = None,
+        shared_subcall_state: dict[str, int] | None = None,
     ):
         """
         Args:
@@ -83,6 +85,7 @@ class RLM:
             environment_kwargs: The kwargs to pass to the environment.
             depth: The current depth of the RLM (0-indexed).
             max_depth: The maximum depth of recursion. When depth >= max_depth, falls back to plain LM completion.
+            max_recursive_calls: Maximum total number of recursive RLM subcalls allowed across the full tree.
             max_iterations: The maximum number of iterations of the RLM.
             max_budget: Maximum budget in USD. Execution stops if exceeded. Requires cost-tracking backend (e.g., OpenRouter).
             max_timeout: Maximum execution time in seconds. Execution stops if exceeded, returning best answer if available.
@@ -135,6 +138,10 @@ class RLM:
 
         self.depth = depth
         self.max_depth = max_depth
+        self.max_recursive_calls = max_recursive_calls
+        self._shared_subcall_state = (
+            shared_subcall_state if shared_subcall_state is not None else {"count": 0}
+        )
         self.max_iterations = max_iterations
         self.max_budget = max_budget
         self.max_timeout = max_timeout
@@ -743,6 +750,23 @@ class RLM:
         subcall_start = time.perf_counter()
         error_msg: str | None = None
 
+        if (
+            self.max_recursive_calls is not None
+            and self._shared_subcall_state["count"] >= self.max_recursive_calls
+        ):
+            return RLMChatCompletion(
+                root_model=resolved_model,
+                prompt=prompt,
+                response=(
+                    "Error: Recursive call limit exceeded - "
+                    f"maximum of {self.max_recursive_calls} recursive calls allowed"
+                ),
+                usage_summary=UsageSummary(model_usage_summaries={}),
+                execution_time=time.perf_counter() - subcall_start,
+            )
+
+        self._shared_subcall_state["count"] += 1
+
         # Spawn a child RLM with its own LocalREPL
         child = RLM(
             backend=self.backend,
@@ -751,6 +775,7 @@ class RLM:
             environment_kwargs=self.environment_kwargs,
             depth=next_depth,
             max_depth=self.max_depth,
+            max_recursive_calls=self.max_recursive_calls,
             max_iterations=self.max_iterations,
             max_budget=remaining_budget,
             max_timeout=remaining_timeout,
@@ -768,6 +793,7 @@ class RLM:
             # Propagate callbacks to children for nested tracking
             on_subcall_start=self.on_subcall_start,
             on_subcall_complete=self.on_subcall_complete,
+            shared_subcall_state=self._shared_subcall_state,
         )
         try:
             result = child.completion(prompt, root_prompt=None)
